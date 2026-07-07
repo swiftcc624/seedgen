@@ -22,15 +22,26 @@ console.log('ok  fresh mnemonic derive  ', p2.address);
 // 3) seal -> unseal round-trip with a real age identity.
 const identity = await generateIdentity();      // AGE-SECRET-KEY-1...
 const recipient = await identityToRecipient(identity); // age1...
-const armored = await seal(mn, [recipient]);
+const armored = await seal(mn, { recipients: [recipient] });
 assert.ok(armored.includes('BEGIN AGE ENCRYPTED FILE'), 'output not armored');
-const round = await unseal(armored, [identity]);
+const round = await unseal(armored, { identities: [identity] });
 assert.equal(round, mn, 'round-trip mnemonic mismatch');
 console.log('ok  seal/unseal round-trip ', fingerprint(recipient));
 
 // 4) Wrong identity must fail to decrypt.
 const otherId = await generateIdentity();
-await assert.rejects(() => unseal(armored, [otherId]), 'wrong key should not decrypt');
+await assert.rejects(() => unseal(armored, { identities: [otherId] }), 'wrong key should not decrypt');
 console.log('ok  wrong key rejected');
+
+// 5) Passphrase (scrypt) round-trip, and wrong passphrase rejected.
+const pass = 'correct horse battery staple';
+const sealedPw = await seal(mn, { passphrase: pass });
+assert.equal(await unseal(sealedPw, { passphrase: pass }), mn, 'passphrase round-trip mismatch');
+await assert.rejects(() => unseal(sealedPw, { passphrase: 'wrong passphrase' }), 'wrong passphrase should fail');
+console.log('ok  passphrase round-trip');
+
+// 6) Modes are mutually exclusive.
+await assert.rejects(() => seal(mn, { recipients: [recipient], passphrase: pass }), 'modes must be exclusive');
+console.log('ok  passphrase/recipient exclusive');
 
 console.log('\nAll tests passed.');

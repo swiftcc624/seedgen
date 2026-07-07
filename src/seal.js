@@ -22,15 +22,25 @@ export function fingerprint(recipient) {
 }
 
 /**
- * Encrypt `plaintext` (string) to one or more age recipients.
+ * Encrypt `plaintext` (string) either to one or more age recipients, or with a
+ * passphrase (scrypt — symmetric, so quantum-resistant). The two modes are
+ * mutually exclusive: age's scrypt stanza cannot be combined with recipients.
  * Returns an ASCII-armored string.
+ *
+ * @param {string} plaintext
+ * @param {{recipients?: string[], passphrase?: string|null}} opts
  */
-export async function seal(plaintext, recipients) {
-  if (!recipients?.length) throw new Error('at least one recipient is required');
+export async function seal(plaintext, { recipients = [], passphrase = null } = {}) {
   const e = new Encrypter();
-  for (const r of recipients) {
-    if (!isRecipient(r)) throw new Error(`not a valid age recipient: ${r}`);
-    e.addRecipient(r.trim());
+  if (passphrase) {
+    if (recipients.length) throw new Error('passphrase and recipients are mutually exclusive');
+    e.setPassphrase(passphrase);
+  } else {
+    if (!recipients.length) throw new Error('a passphrase or at least one recipient is required');
+    for (const r of recipients) {
+      if (!isRecipient(r)) throw new Error(`not a valid age recipient: ${r}`);
+      e.addRecipient(r.trim());
+    }
   }
   const ciphertext = await e.encrypt(plaintext); // Uint8Array
   return armor.encode(ciphertext);
@@ -38,10 +48,15 @@ export async function seal(plaintext, recipients) {
 
 /**
  * Decrypt an age file (armored or binary) with one or more identities
- * (`AGE-SECRET-KEY-1...`). Returns the plaintext string.
+ * (`AGE-SECRET-KEY-1...`) and/or a passphrase. Returns the plaintext string.
+ *
+ * @param {string|Uint8Array} fileContents
+ * @param {{identities?: string[], passphrase?: string|null}} opts
  */
-export async function unseal(fileContents, identities) {
-  if (!identities?.length) throw new Error('at least one identity is required');
+export async function unseal(fileContents, { identities = [], passphrase = null } = {}) {
+  if (!passphrase && !identities.length) {
+    throw new Error('a passphrase or at least one identity is required');
+  }
   const bytes =
     typeof fileContents === 'string' && fileContents.includes(ARMOR_HEADER)
       ? armor.decode(fileContents)
@@ -49,6 +64,7 @@ export async function unseal(fileContents, identities) {
         ? new TextEncoder().encode(fileContents)
         : fileContents;
   const d = new Decrypter();
+  if (passphrase) d.addPassphrase(passphrase);
   for (const id of identities) d.addIdentity(id.trim());
   return await d.decrypt(bytes, 'text');
 }

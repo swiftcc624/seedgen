@@ -98,6 +98,21 @@ Useful flags: `--words 12` (shorter seed), `--account 3` (show a different
 receive index), `--yes` (skip the confirmation prompt — only when scripted),
 `--force` (overwrite an existing output file).
 
+### Alternative: passphrase mode (quantum-resistant)
+
+Instead of a public key, you can encrypt the seed with a **passphrase**. This
+uses age's symmetric scrypt mode, which — unlike the X25519 public-key mode — is
+**post-quantum safe** (no elliptic curve to break). No `age-keygen` step needed.
+
+```bash
+node src/index.js generate --passphrase --out seed.age
+# prompts (hidden): Passphrase: … / Confirm passphrase: …
+```
+
+Use a strong passphrase (a handful of random words). ⚠️ There is **no key file**
+to fall back on — if you forget the passphrase, the seed is gone forever.
+`--passphrase` and `--recipient` are mutually exclusive; pick one per file.
+
 ## Phase 3 — recover (only on the secure machine)
 
 Either the standard `age` tool:
@@ -115,6 +130,13 @@ node src/index.js recover -i backupA.key --in seed.age --show-address   # sanity
 
 `-i` accepts either the key file (`backupA.key`) or the raw
 `AGE-SECRET-KEY-1...` string, and can be repeated to try multiple keys.
+
+If you sealed with a passphrase, recover with `--passphrase` instead:
+
+```bash
+node src/index.js recover --passphrase --in seed.age   # prompts for the passphrase
+age -d seed.age                                        # standard age, also prompts
+```
 
 ## Known limitation
 

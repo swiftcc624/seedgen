@@ -61,10 +61,24 @@ node src/index.js recover -i backupA.key --in seed.age
 ## Commands
 
 ```
-seedgen generate --recipient <age1...> [--recipient ...] [--out seed.age]
-                 [--words 12|24] [--account <n>] [--yes] [--force]
-seedgen recover  --identity <KEY|file> [--in seed.age] [--show-address]
+seedgen generate (--recipient <age1...> [--recipient ...] | --passphrase)
+                 [--out seed.age] [--words 12|24] [--account <n>] [--yes] [--force]
+seedgen recover  (--identity <KEY|file> [--identity ...] | --passphrase)
+                 [--in seed.age] [--show-address]
 seedgen help
+```
+
+### Passphrase mode (post-quantum)
+
+`--passphrase` encrypts the seed symmetrically (age's scrypt mode) instead of to
+a public key. Unlike the default X25519 mode, scrypt has **no elliptic curve for
+a quantum computer to break**, so it is post-quantum safe — at the cost of a
+passphrase you must never forget (there's no key-file fallback). It is mutually
+exclusive with `--recipient`.
+
+```bash
+node src/index.js generate --passphrase --out seed.age
+node src/index.js recover  --passphrase --in  seed.age
 ```
 
 Full walkthrough and diagram: [USAGE.md](./USAGE.md).
