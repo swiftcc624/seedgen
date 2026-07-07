@@ -29,9 +29,13 @@ ever holds a **public** key, so it is physically unable to read the seed back.
 
 ```bash
 npm install
-npm link          # optional: puts `seedgen` on your PATH
 npm test          # run the derivation + round-trip checks
+npm link          # optional: puts `seedgen` on your PATH
 ```
+
+Run it with `node src/index.js` from the project folder, or as the bare
+`seedgen` command once you've run `npm link`. The examples below use the
+`node src/index.js` form.
 
 `age`/`age-keygen` are only needed to create backup keys and (optionally) to
 recover; `seedgen recover` can also decrypt without them.
@@ -42,12 +46,25 @@ recover; `seedgen recover` can also decrypt without them.
 # On the SECURE machine:
 age-keygen -o backupA.key            # note the "age1..." public key
 
-# On the GENERATING machine:
-seedgen generate --recipient age1abc... --out seed.age
+# On the GENERATING machine (keep the command on ONE line):
+node src/index.js generate --recipient age1abc... --out seed.age
 #   → prints wallet address + xpub, writes encrypted seed.age
 
 # Back on the SECURE machine, when you need the seed:
-seedgen recover -i backupA.key --in seed.age
+node src/index.js recover -i backupA.key --in seed.age
+```
+
+> Keep each command on a single line. If you press Enter in the middle, the
+> shell splits it into two commands (e.g. `command not found: --out`). To wrap a
+> long command, end every non-final line with a trailing `\` and no comment.
+
+## Commands
+
+```
+seedgen generate --recipient <age1...> [--recipient ...] [--out seed.age]
+                 [--words 12|24] [--account <n>] [--yes] [--force]
+seedgen recover  --identity <KEY|file> [--in seed.age] [--show-address]
+seedgen help
 ```
 
 Full walkthrough and diagram: [USAGE.md](./USAGE.md).

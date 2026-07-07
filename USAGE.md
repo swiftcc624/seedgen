@@ -4,6 +4,11 @@
 public key**. The plaintext seed is never stored or transmitted — it is only
 decrypted later on the air-gapped machine that holds the matching secret key.
 
+> **How to run it.** If you haven't installed it globally, invoke it with
+> `node src/index.js` from the project folder. If you run `npm link` once, you
+> can use the bare command `seedgen` instead. In the examples below,
+> **`seedgen` = `node src/index.js`** unless you've linked it.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  PHASE 1 — SETUP           Machine A  (air-gapped, secure, stays offline) │
@@ -59,12 +64,30 @@ machine. For redundancy, repeat on a second secure machine to get `backupB.key`
 
 ## Phase 2 — generate & seal (on the generating machine)
 
+Single recipient — **keep the whole command on one line:**
+
 ```bash
-seedgen generate \
-  --recipient age1abc... \
-  --recipient age1xyz... \   # optional 2nd key = recover even if one is lost
-  --out seed.age
+node src/index.js generate --recipient age1abc... --out seed.age
 ```
+
+Two recipients (recover even if one key is lost):
+
+```bash
+node src/index.js generate --recipient age1abc... --recipient age1xyz... --out seed.age
+```
+
+> ⚠️ **Keep it on one line.** If you press Enter mid-command, the shell runs the
+> two halves as separate commands (you'll see errors like
+> `command not found: --out`, and `generate` runs with whatever was on the first
+> line only). If you *want* to split it, end **every** non-final line with a
+> trailing backslash and put **no comment after it**:
+>
+> ```bash
+> node src/index.js generate \
+>   --recipient age1abc... \
+>   --recipient age1xyz... \
+>   --out seed.age
+> ```
 
 You will be shown each recipient's fingerprint and asked to confirm it matches
 the key on your secure machine (this blocks a swapped-key attack). On success it
@@ -72,23 +95,26 @@ prints the **public** wallet address + account `xpub` and writes the encrypted
 `seed.age`. The mnemonic itself is never printed or written in the clear.
 
 Useful flags: `--words 12` (shorter seed), `--account 3` (show a different
-receive index), `--yes` (skip the prompt, only if scripted), `--force`
-(overwrite an existing output file).
+receive index), `--yes` (skip the confirmation prompt — only when scripted),
+`--force` (overwrite an existing output file).
 
 ## Phase 3 — recover (only on the secure machine)
 
 Either the standard `age` tool:
 
 ```bash
-age -d -i backupA.key seed.age        # prints the 24 words
+age -d -i backupA.key seed.age        # prints the seed words
 ```
 
 or this CLI (same result, no `age` binary needed):
 
 ```bash
-seedgen recover -i backupA.key --in seed.age
-seedgen recover -i backupA.key --in seed.age --show-address   # sanity-check the address
+node src/index.js recover -i backupA.key --in seed.age
+node src/index.js recover -i backupA.key --in seed.age --show-address   # sanity-check the address
 ```
+
+`-i` accepts either the key file (`backupA.key`) or the raw
+`AGE-SECRET-KEY-1...` string, and can be repeated to try multiple keys.
 
 ## Known limitation
 
