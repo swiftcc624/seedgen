@@ -98,20 +98,40 @@ Useful flags: `--words 12` (shorter seed), `--account 3` (show a different
 receive index), `--yes` (skip the confirmation prompt — only when scripted),
 `--force` (overwrite an existing output file).
 
-### Alternative: passphrase mode (quantum-resistant)
+### Post-quantum options (quantum-resistant)
 
-Instead of a public key, you can encrypt the seed with a **passphrase**. This
-uses age's symmetric scrypt mode, which — unlike the X25519 public-key mode — is
-**post-quantum safe** (no elliptic curve to break). No `age-keygen` step needed.
+The default `age1...` recipient uses X25519, which a future quantum computer
+could break. Two ways to be quantum-resistant:
+
+**Option A — post-quantum recipient (recommended).** age ≥ 1.3.0 can generate a
+native post-quantum key with `age-keygen -pq`; its public key starts with
+`age1pq1...` (hybrid ML-KEM-768). Use it anywhere you'd use a normal recipient —
+seedgen accepts it directly (requires `age-encryption` ≥ 0.3.0). This keeps the
+public-key model: Machine B still holds no secret.
+
+```bash
+# Phase 1 on the secure machine:
+age-keygen -pq -o backupA-pq.key       # public key: age1pq1...
+
+# Phase 2 on the generating machine:
+node src/index.js generate --recipient age1pq1... --out seed.age
+
+# Phase 3 recovery on the secure machine:
+node src/index.js recover -i backupA-pq.key --in seed.age
+```
+
+**Option B — passphrase.** Encrypt the seed with a **passphrase** (age's
+symmetric scrypt mode) — also post-quantum safe, and needs no key file at all.
 
 ```bash
 node src/index.js generate --passphrase --out seed.age
 # prompts (hidden): Passphrase: … / Confirm passphrase: …
 ```
 
-Use a strong passphrase (a handful of random words). ⚠️ There is **no key file**
-to fall back on — if you forget the passphrase, the seed is gone forever.
-`--passphrase` and `--recipient` are mutually exclusive; pick one per file.
+Use a strong passphrase (a handful of random words). ⚠️ With Option B there is
+**no key file** to fall back on — if you forget the passphrase, the seed is gone
+forever. `--passphrase` and `--recipient` are mutually exclusive; pick one per
+file.
 
 ## Phase 3 — recover (only on the secure machine)
 

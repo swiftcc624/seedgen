@@ -1,9 +1,9 @@
 // Minimal sanity test: derivation must match a well-known vector, and a
 // seal -> unseal round-trip must return the same mnemonic.
 import assert from 'node:assert/strict';
-import { generateIdentity, identityToRecipient } from 'age-encryption';
+import { generateIdentity, generateHybridIdentity, identityToRecipient } from 'age-encryption';
 import { derivePublic, newMnemonic } from '../src/wallet.js';
-import { seal, unseal, fingerprint } from '../src/seal.js';
+import { seal, unseal, fingerprint, isRecipient } from '../src/seal.js';
 
 // 1) Known hardhat/anvil mnemonic -> account 0 address (m/44'/60'/0'/0/0).
 const KNOWN = 'test test test test test test test test test test test junk';
@@ -43,5 +43,14 @@ console.log('ok  passphrase round-trip');
 // 6) Modes are mutually exclusive.
 await assert.rejects(() => seal(mn, { recipients: [recipient], passphrase: pass }), 'modes must be exclusive');
 console.log('ok  passphrase/recipient exclusive');
+
+// 7) Native post-quantum recipient (age1pq1..., hybrid ML-KEM-768) round-trip.
+const pqId = await generateHybridIdentity();      // AGE-SECRET-KEY-PQ-1...
+const pqRcpt = await identityToRecipient(pqId);   // age1pq1...
+assert.ok(pqRcpt.startsWith('age1pq1'), 'expected a post-quantum recipient');
+assert.ok(isRecipient(pqRcpt), 'isRecipient must accept pq recipients');
+const pqSealed = await seal(mn, { recipients: [pqRcpt] });
+assert.equal(await unseal(pqSealed, { identities: [pqId] }), mn, 'pq round-trip mismatch');
+console.log('ok  post-quantum round-trip');
 
 console.log('\nAll tests passed.');

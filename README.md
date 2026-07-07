@@ -68,18 +68,30 @@ seedgen recover  (--identity <KEY|file> [--identity ...] | --passphrase)
 seedgen help
 ```
 
-### Passphrase mode (post-quantum)
+### Post-quantum backups
 
-`--passphrase` encrypts the seed symmetrically (age's scrypt mode) instead of to
-a public key. Unlike the default X25519 mode, scrypt has **no elliptic curve for
-a quantum computer to break**, so it is post-quantum safe — at the cost of a
-passphrase you must never forget (there's no key-file fallback). It is mutually
-exclusive with `--recipient`.
+There are two quantum-resistant options:
 
-```bash
-node src/index.js generate --passphrase --out seed.age
-node src/index.js recover  --passphrase --in  seed.age
-```
+1. **Post-quantum recipient (recommended).** age ≥ 1.3.0 has native
+   post-quantum keys (`age-keygen -pq` → an `age1pq1...` recipient, hybrid
+   ML-KEM-768). Pass it to `--recipient` exactly like a normal key — seedgen
+   supports it out of the box (needs `age-encryption` ≥ 0.3.0). This keeps the
+   asymmetric model: the generating machine holds only the public key.
+
+   ```bash
+   age-keygen -pq -o backupA-pq.key                 # on the secure machine
+   node src/index.js generate --recipient age1pq1... --out seed.age
+   node src/index.js recover  -i backupA-pq.key --in seed.age
+   ```
+
+2. **Passphrase mode.** `--passphrase` encrypts symmetrically (age's scrypt
+   mode) with no key file at all — also post-quantum safe, but you must never
+   forget the passphrase. Mutually exclusive with `--recipient`.
+
+   ```bash
+   node src/index.js generate --passphrase --out seed.age
+   node src/index.js recover  --passphrase --in  seed.age
+   ```
 
 Full walkthrough and diagram: [USAGE.md](./USAGE.md).
 
