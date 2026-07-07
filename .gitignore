@@ -1,0 +1,8 @@
+node_modules/
+
+# Never commit secrets or generated artifacts
+*.age
+*.key
+backup*.key
+secret*.key
+seed.age

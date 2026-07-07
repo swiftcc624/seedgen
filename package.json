@@ -1,0 +1,30 @@
+{
+  "name": "seedgen",
+  "version": "1.0.0",
+  "description": "Offline CLI that generates a wallet seed and seals it to a backup public key (age). The plaintext seed is never stored or transmitted.",
+  "type": "module",
+  "bin": {
+    "seedgen": "src/index.js"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/derive.test.mjs"
+  },
+  "keywords": [
+    "bip39",
+    "wallet",
+    "seed",
+    "age",
+    "encryption",
+    "offline"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@scure/bip32": "^1.7.0",
+    "@scure/bip39": "^1.6.0",
+    "age-encryption": "^0.2.4"
+  }
+}
