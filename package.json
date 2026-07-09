@@ -9,7 +9,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/derive.test.mjs"
+    "test": "node test/derive.test.mjs && node test/ssh.e2e.mjs"
   },
   "keywords": [
     "bip39",

@@ -62,6 +62,18 @@ age-keygen -o backupA.key
 machine. For redundancy, repeat on a second secure machine to get `backupB.key`
 / `age1xyz...`.
 
+**Using an SSH key instead.** You can use an existing SSH key as the backup key:
+give its **public** key to `--recipient` and keep the **private** key on Machine
+A for recovery. This requires the `age` binary on Machine B (SSH is delegated to
+it). SSH keys are *not* post-quantum — prefer `age-keygen -pq` if that matters.
+
+```bash
+# Machine B (generate), Machine A holds ~/.ssh/id_ed25519:
+node src/index.js generate --recipient "$(cat id_ed25519.pub)" --out seed.age
+# Machine A (recover):
+node src/index.js recover --identity id_ed25519 --in seed.age
+```
+
 ## Phase 2 — generate & seal (on the generating machine)
 
 Single recipient — **keep the whole command on one line:**

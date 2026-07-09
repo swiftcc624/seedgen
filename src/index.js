@@ -12,18 +12,21 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { newMnemonic, derivePublic } from './wallet.js';
-import { seal, unseal, isRecipient, fingerprint } from './seal.js';
+import { seal, unseal, isRecipient, isSshRecipient, fingerprint } from './seal.js';
+import { ageVersion } from './agecli.js';
 
 const HELP = `seedgen — generate a wallet seed and seal it to a backup public key
 
 USAGE
-  seedgen generate --recipient <age1...> [--recipient <age1...>] [options]
-  seedgen recover  --identity  <AGE-SECRET-KEY-1...> [--in <file>]
+  seedgen generate --recipient <age1...|ssh-...|file> [--recipient ...] [options]
+  seedgen recover  --identity  <AGE-SECRET-KEY-1...|keyfile> [--in <file>]
   seedgen help
 
 GENERATE OPTIONS
-  -r, --recipient <age1...>   Backup public key to encrypt to. Repeatable;
-                              any one matching secret key can later recover.
+  -r, --recipient <key>       Backup public key to encrypt to. Accepts an age
+                              key (age1.../age1pq1...), an SSH public key
+                              ("ssh-ed25519 ..."/"ssh-rsa ..."), or a .pub file.
+                              Repeatable; any one matching key can later recover.
   -p, --passphrase            Encrypt with a passphrase instead of recipients
                               (symmetric/scrypt — quantum-resistant). Prompts.
   -o, --out <file>            Output ciphertext path (default: seed.age)
@@ -33,16 +36,19 @@ GENERATE OPTIONS
   -f, --force                 Overwrite --out if it already exists
 
   Provide EITHER --recipient (one or more) OR --passphrase, not both.
+  SSH recipients require the 'age' binary on PATH (age >= 1.1).
 
 RECOVER OPTIONS
-  -i, --identity <KEY|file>   age secret key string, or a path to a key file.
-                              Repeatable.
+  -i, --identity <KEY|file>   age secret key string, an age key file, or an SSH
+                              private key file. Repeatable.
   -p, --passphrase            Decrypt a passphrase-encrypted file. Prompts.
       --in <file>             Ciphertext to decrypt (default: seed.age)
       --show-address          Also derive & print the address (sanity check)
 
+  SSH identities require the 'age' binary on PATH.
+
 Recovery is also possible without this tool:
-  age -d -i secret.key seed.age     (key mode)
+  age -d -i secret.key seed.age     (age or SSH key)
   age -d seed.age                   (passphrase mode — age will prompt)
 `;
 
@@ -105,18 +111,38 @@ async function readNewPassphrase() {
   return a;
 }
 
-/** Accept an identity given either inline or as a path to a key file. */
-function resolveIdentity(value) {
+/** Resolve a --recipient value to a recipient STRING. Accepts an age/SSH key
+ *  string directly, or a path to a file whose first key-like line is used
+ *  (e.g. an SSH `.pub` file). */
+function resolveRecipient(value) {
   const v = value.trim();
-  if (v.startsWith('AGE-SECRET-KEY-')) return v;
+  if (isRecipient(v)) return v;
   if (existsSync(v)) {
-    // age key files may contain comment lines (`# ...`); pick the key line.
     const line = readFileSync(v, 'utf8')
       .split(/\r?\n/)
       .map((l) => l.trim())
+      .find((l) => l && !l.startsWith('#'));
+    if (line && isRecipient(line)) return line;
+    fail(`file ${v} does not contain a recognizable recipient`);
+  }
+  fail(`not a valid recipient (age1.../ssh-... or a .pub file): ${value}`);
+}
+
+/** Classify a --identity value into an in-process age identity or a key FILE
+ *  (SSH private keys and age key files are handled by the age binary). */
+function classifyIdentity(value) {
+  const v = value.trim();
+  if (v.startsWith('AGE-SECRET-KEY-')) return { kind: 'age', value: v };
+  if (existsSync(v)) {
+    const content = readFileSync(v, 'utf8');
+    // An age key file: use the inline key in-process (no binary needed).
+    const ageLine = content
+      .split(/\r?\n/)
+      .map((l) => l.trim())
       .find((l) => l.startsWith('AGE-SECRET-KEY-'));
-    if (!line) fail(`no AGE-SECRET-KEY found in ${v}`);
-    return line;
+    if (ageLine) return { kind: 'age', value: ageLine };
+    // Otherwise treat it as a key file for the age binary (e.g. SSH key).
+    return { kind: 'file', value: v };
   }
   fail(`identity is neither an AGE-SECRET-KEY nor a readable file: ${value}`);
 }
@@ -136,14 +162,19 @@ async function cmdGenerate(argv) {
     allowPositionals: false,
   });
 
-  const recipients = (values.recipient ?? []).map((r) => r.trim());
-  if (values.passphrase && recipients.length > 0) {
+  const rawRecipients = values.recipient ?? [];
+  if (values.passphrase && rawRecipients.length > 0) {
     fail('use EITHER --passphrase OR --recipient, not both');
   }
-  if (!values.passphrase && recipients.length === 0) {
-    fail('provide --passphrase or at least one --recipient (age1...)');
+  if (!values.passphrase && rawRecipients.length === 0) {
+    fail('provide --passphrase or at least one --recipient (age1.../ssh-...)');
   }
-  for (const r of recipients) if (!isRecipient(r)) fail(`not a valid age recipient: ${r}`);
+  const recipients = rawRecipients.map(resolveRecipient);
+  // SSH recipients are sealed via the age binary — check it exists up front,
+  // before we generate any seed material.
+  if (recipients.some(isSshRecipient) && !ageVersion()) {
+    fail("SSH recipients require the 'age' binary on PATH (install age >= 1.1)");
+  }
 
   const words = values.words === '12' ? 12 : values.words === '24' ? 24 : fail('--words must be 12 or 24');
   const index = Number.parseInt(values.account, 10);
@@ -212,10 +243,16 @@ async function cmdRecover(argv) {
     allowPositionals: false,
   });
 
-  const ids = (values.identity ?? []).map(resolveIdentity);
-  if (values.passphrase && ids.length > 0) fail('use EITHER --passphrase OR --identity, not both');
-  if (!values.passphrase && ids.length === 0) {
+  const parsed = (values.identity ?? []).map(classifyIdentity);
+  const identities = parsed.filter((p) => p.kind === 'age').map((p) => p.value);
+  const identityFiles = parsed.filter((p) => p.kind === 'file').map((p) => p.value);
+
+  if (values.passphrase && parsed.length > 0) fail('use EITHER --passphrase OR --identity, not both');
+  if (!values.passphrase && parsed.length === 0) {
     fail('provide --passphrase or at least one --identity (AGE-SECRET-KEY-... or key file)');
+  }
+  if (identityFiles.length && !ageVersion()) {
+    fail("SSH/key-file identities require the 'age' binary on PATH (install age >= 1.1)");
   }
   if (!existsSync(values.in)) fail(`ciphertext not found: ${values.in}`);
 
@@ -224,7 +261,7 @@ async function cmdRecover(argv) {
   const contents = readFileSync(values.in, 'utf8');
   let mnemonic;
   try {
-    mnemonic = await unseal(contents, { identities: ids, passphrase });
+    mnemonic = await unseal(contents, { identities, identityFiles, passphrase });
   } catch (e) {
     fail(`decryption failed (wrong key/passphrase or corrupt file): ${e.message}`);
   }

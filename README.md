@@ -61,12 +61,32 @@ node src/index.js recover -i backupA.key --in seed.age
 ## Commands
 
 ```
-seedgen generate (--recipient <age1...> [--recipient ...] | --passphrase)
+seedgen generate (--recipient <age1...|ssh-...|file> [--recipient ...] | --passphrase)
                  [--out seed.age] [--words 12|24] [--account <n>] [--yes] [--force]
-seedgen recover  (--identity <KEY|file> [--identity ...] | --passphrase)
+seedgen recover  (--identity <KEY|keyfile> [--identity ...] | --passphrase)
                  [--in seed.age] [--show-address]
 seedgen help
 ```
+
+### SSH keys
+
+`--recipient` also accepts an **SSH public key** (`ssh-ed25519 …`, `ssh-rsa …`,
+or a `.pub` file), and `recover --identity` accepts the matching **SSH private
+key file**. This lets you reuse an existing SSH key as the backup key.
+
+```bash
+seedgen generate --recipient "$(cat ~/.ssh/id_ed25519.pub)" --out seed.age
+seedgen recover  --identity  ~/.ssh/id_ed25519 --in seed.age
+```
+
+SSH keys are handled by delegating to the standard **`age` binary** (the JS
+library can't do SSH), so `age` must be on `PATH` (≥ 1.1) when an SSH key is
+used. age-native and passphrase modes stay fully in-process and need no binary.
+You can mix age and SSH recipients in one file — any listed key can recover it.
+
+> Note: SSH keys are not post-quantum. For quantum resistance use `age-keygen
+> -pq` (an `age1pq1…` recipient) or `--passphrase`. Reusing your SSH *auth* key
+> for encryption also mixes purposes — a dedicated key is cleaner.
 
 ### Post-quantum backups
 

@@ -1,15 +1,38 @@
-// Encrypt-to-public-key and decrypt, using the audited `age-encryption` library.
-// Output is ASCII-armored so a backup is text-friendly (paste / QR / paper) and
-// still opens with the standard `age` CLI, which auto-detects armor on decrypt.
+// Encrypt-to-public-key and decrypt. age-native (age1.../age1pq1...) and
+// passphrase modes run fully in-process via the audited `age-encryption`
+// library. SSH recipients/identities are delegated to the standard `age`
+// binary (typage cannot do SSH), so we still never hand-roll crypto.
+// Output is ASCII-armored so a backup is text-friendly and opens with plain age.
 
 import { Encrypter, Decrypter, armor } from 'age-encryption';
 import { createHash } from 'node:crypto';
+import { sealWithBinary, unsealWithBinary, ageVersion, versionAtLeast } from './agecli.js';
 
 const ARMOR_HEADER = '-----BEGIN AGE ENCRYPTED FILE-----';
 
-/** Basic shape check for an age recipient string. */
-export function isRecipient(s) {
+/** age-native recipient (X25519 `age1...` or post-quantum `age1pq1...`). */
+export function isAgeRecipient(s) {
   return typeof s === 'string' && /^age1[0-9a-z]+$/.test(s.trim());
+}
+
+/** Post-quantum age recipient (needs age >= 1.3.0 in the binary path). */
+export function isPqRecipient(s) {
+  return typeof s === 'string' && /^age1pq1/.test(s.trim());
+}
+
+/** OpenSSH public key line (ed25519 / rsa / ecdsa / sk-*). */
+export function isSshRecipient(s) {
+  return (
+    typeof s === 'string' &&
+    /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[\w-]+|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-[\w-]+@openssh\.com)\s+\S+/.test(
+      s.trim(),
+    )
+  );
+}
+
+/** Any recipient seedgen can seal to. */
+export function isRecipient(s) {
+  return isAgeRecipient(s) || isSshRecipient(s);
 }
 
 /**
@@ -21,50 +44,91 @@ export function fingerprint(recipient) {
   return `${h.slice(0, 4)}-${h.slice(4, 8)}-${h.slice(8, 12)}`.toUpperCase();
 }
 
+/** Throw a clear error if SSH is requested but the age binary can't serve it. */
+function requireAgeBinaryFor(recipients) {
+  const v = ageVersion();
+  if (!v) {
+    throw new Error("SSH recipients require the 'age' binary on PATH (install age >= 1.1)");
+  }
+  if (recipients.some(isPqRecipient) && !versionAtLeast(v, '1.3.0')) {
+    throw new Error(
+      `mixing a post-quantum (age1pq1) recipient with SSH needs age >= 1.3.0, found ${v}`,
+    );
+  }
+  return v;
+}
+
 /**
- * Encrypt `plaintext` (string) either to one or more age recipients, or with a
- * passphrase (scrypt — symmetric, so quantum-resistant). The two modes are
- * mutually exclusive: age's scrypt stanza cannot be combined with recipients.
- * Returns an ASCII-armored string.
+ * Encrypt `plaintext` (string) to recipients, or with a passphrase (scrypt —
+ * symmetric, quantum-resistant). Passphrase and recipients are mutually
+ * exclusive. Returns ASCII-armored ciphertext.
  *
  * @param {string} plaintext
  * @param {{recipients?: string[], passphrase?: string|null}} opts
  */
 export async function seal(plaintext, { recipients = [], passphrase = null } = {}) {
-  const e = new Encrypter();
   if (passphrase) {
     if (recipients.length) throw new Error('passphrase and recipients are mutually exclusive');
+    const e = new Encrypter();
     e.setPassphrase(passphrase);
-  } else {
-    if (!recipients.length) throw new Error('a passphrase or at least one recipient is required');
-    for (const r of recipients) {
-      if (!isRecipient(r)) throw new Error(`not a valid age recipient: ${r}`);
-      e.addRecipient(r.trim());
-    }
+    return armor.encode(await e.encrypt(plaintext));
   }
-  const ciphertext = await e.encrypt(plaintext); // Uint8Array
-  return armor.encode(ciphertext);
+
+  if (!recipients.length) throw new Error('a passphrase or at least one recipient is required');
+  const rs = recipients.map((r) => r.trim());
+  for (const r of rs) if (!isRecipient(r)) throw new Error(`not a valid recipient: ${r}`);
+
+  // Any SSH recipient forces the age-binary path (it also handles age-native
+  // recipients in the same file, so a mixed backup is openable by any key).
+  if (rs.some(isSshRecipient)) {
+    requireAgeBinaryFor(rs);
+    return await sealWithBinary(plaintext, rs);
+  }
+
+  // All age-native: stay fully in-process.
+  const e = new Encrypter();
+  for (const r of rs) e.addRecipient(r);
+  return armor.encode(await e.encrypt(plaintext));
 }
 
 /**
- * Decrypt an age file (armored or binary) with one or more identities
- * (`AGE-SECRET-KEY-1...`) and/or a passphrase. Returns the plaintext string.
+ * Decrypt an armored age file. Tries, in order: passphrase and/or inline age
+ * identities (in-process), then each identity FILE via the age binary (this is
+ * how SSH private keys — and age key files — are used). Returns the first
+ * successful plaintext.
  *
  * @param {string|Uint8Array} fileContents
- * @param {{identities?: string[], passphrase?: string|null}} opts
+ * @param {{identities?: string[], identityFiles?: string[], passphrase?: string|null}} opts
  */
-export async function unseal(fileContents, { identities = [], passphrase = null } = {}) {
-  if (!passphrase && !identities.length) {
+export async function unseal(fileContents, { identities = [], identityFiles = [], passphrase = null } = {}) {
+  if (!passphrase && !identities.length && !identityFiles.length) {
     throw new Error('a passphrase or at least one identity is required');
   }
-  const bytes =
-    typeof fileContents === 'string' && fileContents.includes(ARMOR_HEADER)
-      ? armor.decode(fileContents)
-      : typeof fileContents === 'string'
-        ? new TextEncoder().encode(fileContents)
-        : fileContents;
-  const d = new Decrypter();
-  if (passphrase) d.addPassphrase(passphrase);
-  for (const id of identities) d.addIdentity(id.trim());
-  return await d.decrypt(bytes, 'text');
+  const text =
+    typeof fileContents === 'string' ? fileContents : new TextDecoder().decode(fileContents);
+  const errors = [];
+
+  // In-process path: passphrase and/or inline age identities.
+  if (passphrase || identities.length) {
+    try {
+      const bytes = text.includes(ARMOR_HEADER) ? armor.decode(text) : new TextEncoder().encode(text);
+      const d = new Decrypter();
+      if (passphrase) d.addPassphrase(passphrase);
+      for (const id of identities) d.addIdentity(id.trim());
+      return await d.decrypt(bytes, 'text');
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+
+  // Binary path: SSH keys or age key files, each tried independently.
+  for (const f of identityFiles) {
+    try {
+      return await unsealWithBinary(text, f);
+    } catch (e) {
+      errors.push(`${f}: ${e.message}`);
+    }
+  }
+
+  throw new Error(errors.join('; ') || 'no identity could decrypt the file');
 }
